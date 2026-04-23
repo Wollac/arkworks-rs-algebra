@@ -6,6 +6,7 @@ members = [
     "ff-macros",
     "ff-asm",
     "ff",
+    "ff-risc0",
 
     "ec",
     "bench-templates",

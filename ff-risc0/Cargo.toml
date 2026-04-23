@@ -1,0 +1,33 @@
+[package]
+name = "ark-ff-risc0"
+description = "RISC Zero zkVM backend for ark-ff, routing field arithmetic through risc0-bigint2 syscalls"
+keywords = ["cryptography", "finite-fields", "risc0", "zkvm"]
+version.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+categories.workspace = true
+include.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+metadata.docs.rs.workspace = true
+metadata.release.workspace = true
+
+[dependencies]
+ark-ff.workspace = true
+ark-ec.workspace = true
+ark-std.workspace = true
+ark-serialize.workspace = true
+num-bigint.workspace = true
+
+[target.'cfg(target_os = "zkvm")'.dependencies]
+risc0-bigint2 = "1.4.13"
+
+[dev-dependencies]
+ark-test-curves = { workspace = true, features = ["secp256k1", "bls12_381_curve"] }
+num-traits.workspace = true
+
+[features]
+default = []
+std = ["ark-std/std", "ark-ff/std", "ark-ec/std", "ark-serialize/std", "num-bigint/std"]
