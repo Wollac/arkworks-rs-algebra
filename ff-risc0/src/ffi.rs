@@ -21,28 +21,28 @@ use ark_ff::BigInt;
 pub trait FieldFfi: Sized {
     /// # Safety
     ///
-    /// - All pointers must be readable/writable and properly aligned for `Self`.
+    /// - `a`, `b`, and `out` must be readable/writable and properly aligned for `Self`.
     /// - `out` may alias `a` or `b` (risc0-bigint2 reads before writing).
-    unsafe fn modadd(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+    unsafe fn modadd(a: *const Self, b: *const Self, m: &Self, out: *mut Self);
 
     /// # Safety
     ///
     /// Same aliasing rules as [`FieldFfi::modadd`].
-    unsafe fn modsub(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+    unsafe fn modsub(a: *const Self, b: *const Self, m: &Self, out: *mut Self);
 
     /// # Safety
     ///
     /// Same aliasing rules as [`FieldFfi::modadd`].
-    unsafe fn modmul(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+    unsafe fn modmul(a: *const Self, b: *const Self, m: &Self, out: *mut Self);
 
     /// # Safety
     ///
-    /// - All pointers must be readable/writable and properly aligned for `Self`.
-    /// - `out` must NOT alias `a` (the `modinv` circuit has multi-constraint structure
+    /// - `out` must be writable and properly aligned for `Self`, and must point to
+    ///   memory distinct from `a` (the `modinv` circuit has multi-constraint structure
     ///   that miscompiles on aliased input/output).
     /// - `*a` must not be zero; the zkvm path panics and the host path panics via
     ///   `BigUint::modinv` returning `None`.
-    unsafe fn modinv(a: *const Self, m: *const Self, out: *mut Self);
+    unsafe fn modinv(a: &Self, m: &Self, out: *mut Self);
 
     /// Unchecked modular add.
     ///
@@ -54,14 +54,14 @@ pub trait FieldFfi: Sized {
     /// # Safety
     ///
     /// Same aliasing rules as [`FieldFfi::modadd`].
-    unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+    unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self);
 
     /// Unchecked modular multiply. See [`FieldFfi::modadd_unchecked`].
     ///
     /// # Safety
     ///
     /// Same aliasing rules as [`FieldFfi::modmul`].
-    unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+    unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self);
 }
 
 #[cfg(target_os = "zkvm")]
@@ -83,54 +83,66 @@ mod zkvm_impl {
     // RISC-V), `[u64; N]` is bit-identical to `[u32; 2N]`, so the cast is a no-op.
     impl FieldFfi for BigInt<4> {
         #[inline(always)]
-        unsafe fn modadd(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modadd(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modadd_256(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modsub(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modsub(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modsub_256(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modmul(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modmul(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modmul_256(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modinv(a: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modinv(a: &Self, m: &Self, out: *mut Self) {
+            let (a, m): (*const Self, *const Self) = (a, m);
             unsafe { modinv_256(&*a.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modadd_256_unchecked(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modmul_256_unchecked(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
     }
 
     impl FieldFfi for BigInt<6> {
         #[inline(always)]
-        unsafe fn modadd(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modadd(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modadd_384(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modsub(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modsub(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modsub_384(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modmul(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modmul(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modmul_384(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modinv(a: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modinv(a: &Self, m: &Self, out: *mut Self) {
+            let (a, m): (*const Self, *const Self) = (a, m);
             unsafe { modinv_384(&*a.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modadd_384_unchecked(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
         #[inline(always)]
-        unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let m: *const Self = m;
             unsafe { modmul_384_unchecked(&*a.cast(), &*b.cast(), &*m.cast(), &mut *out.cast()) }
         }
     }
@@ -145,35 +157,34 @@ mod host_impl {
     // subsequent `BigUint` conversions never hold references into memory that `out` might
     // alias. This keeps the host path UB-free regardless of aliasing.
     impl<const N: usize> FieldFfi for BigInt<N> {
-        unsafe fn modadd(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
-            let (a, b, m) = unsafe { (*a, *b, *m) };
-            let r = (BigUint::from(a) + BigUint::from(b)) % BigUint::from(m);
+        unsafe fn modadd(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let (a, b) = unsafe { (*a, *b) };
+            let r = (BigUint::from(a) + BigUint::from(b)) % BigUint::from(*m);
             unsafe { *out = BigInt::try_from(r).expect("result < m fits in BigInt<N>") }
         }
-        unsafe fn modsub(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
-            let (a, b, m) = unsafe { (*a, *b, *m) };
-            let (a, b, m) = (BigUint::from(a), BigUint::from(b), BigUint::from(m));
+        unsafe fn modsub(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let (a, b) = unsafe { (*a, *b) };
+            let (a, b, m) = (BigUint::from(a), BigUint::from(b), BigUint::from(*m));
             let r = (&a + &m - b) % &m;
             unsafe { *out = BigInt::try_from(r).expect("result < m fits in BigInt<N>") }
         }
-        unsafe fn modmul(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
-            let (a, b, m) = unsafe { (*a, *b, *m) };
-            let r = (BigUint::from(a) * BigUint::from(b)) % BigUint::from(m);
+        unsafe fn modmul(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
+            let (a, b) = unsafe { (*a, *b) };
+            let r = (BigUint::from(a) * BigUint::from(b)) % BigUint::from(*m);
             unsafe { *out = BigInt::try_from(r).expect("result < m fits in BigInt<N>") }
         }
-        unsafe fn modinv(a: *const Self, m: *const Self, out: *mut Self) {
-            let (a, m) = unsafe { (*a, *m) };
-            let inv = BigUint::from(a)
-                .modinv(&BigUint::from(m))
+        unsafe fn modinv(a: &Self, m: &Self, out: *mut Self) {
+            let inv = BigUint::from(*a)
+                .modinv(&BigUint::from(*m))
                 .expect("modinv: non-invertible input");
             unsafe { *out = BigInt::try_from(inv).expect("inv < m fits in BigInt<N>") }
         }
         // Host fallback: `num-bigint` always reduces via `%`, so checked and unchecked behave
         // identically on the host. We simply forward.
-        unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
             unsafe { <Self as FieldFfi>::modadd(a, b, m, out) }
         }
-        unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+        unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
             unsafe { <Self as FieldFfi>::modmul(a, b, m, out) }
         }
     }
