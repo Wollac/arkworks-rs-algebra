@@ -5,8 +5,7 @@ use ark_ec::{
     short_weierstrass::{Affine, Projective},
 };
 use ark_ff::{AdditiveGroup, BigInt, Field, PrimeField, Zero};
-// Brings `from_sign_and_limbs` into scope for `Self::ScalarField::from_sign_and_limbs(...)` below.
-// On the host the inherent `MontBackend` method is used instead.
+// Brings `from_sign_and_limbs` into method-call scope for `Self::ScalarField` on zkvm.
 #[cfg(all(target_os = "zkvm", target_vendor = "risc0"))]
 use ark_ff_risc0::R0Fp as _;
 

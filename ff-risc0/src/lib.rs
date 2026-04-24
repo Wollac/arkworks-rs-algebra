@@ -1,19 +1,19 @@
 //! RISC Zero zkVM backend for `ark-ff`.
 //!
-//! Provides [`R0Backend`] and [`R0Config`], an alternative to the default `MontBackend` that
-//! routes field arithmetic through `risc0-bigint2` accelerator syscalls when compiled for the
-//! `zkvm` target. On other targets the same crate still builds and runs using a `num-bigint`
-//! fallback so host-side tests keep working.
+//! Provides [`R0Backend`] and [`R0Config`], an alternative to `MontBackend` that routes
+//! field arithmetic through `risc0-bigint2` accelerator syscalls on the `zkvm` target.
+//! On other targets the same crate builds against a `num-bigint` fallback, so host-side
+//! tests keep working.
 //!
 //! # Representation
 //!
-//! Unlike `MontBackend`, elements are stored as plain integers in `[0, p)` rather than in
-//! Montgomery form. This avoids per-op Montgomery reductions, which would dominate the cost of a
-//! single `modmul` syscall. `from_bigint`/`into_bigint` are therefore zero-cost.
+//! Elements are stored as plain integers in `[0, p)` rather than in Montgomery form.
+//! This avoids per-op Montgomery reductions, which would dominate the cost of a single
+//! `modmul` syscall. `from_bigint` and `into_bigint` are therefore zero-cost.
 //!
 //! # Supported widths
 //!
-//! Currently `N = 4` (256-bit) and `N = 6` (384-bit), matching the modular-arithmetic accelerator
+//! `N = 4` (256-bit) and `N = 6` (384-bit), matching the modular-arithmetic accelerator
 //! blobs shipped by `risc0-bigint2`.
 //!
 //! # Example
@@ -47,12 +47,14 @@ pub use config::R0Config;
 pub use const_helpers::const_from_sign_and_limbs;
 pub use ffi::FieldFfi;
 
-/// Construct a plain-integer field element `Fp<R0Backend<_, N>, N>` from a numeric literal.
+/// Constructs a plain-integer field element `Fp<R0Backend<_, N>, N>` from a numeric literal.
 ///
 /// Accepts decimal, hex (`0x...`), octal (`0o...`), or binary (`0b...`) strings, optionally
 /// preceded by `-`; same surface as arkworks' [`ark_ff::MontFp!`]. Negative literals yield
-/// `MODULUS - |value|`. The unsigned magnitude must be strictly less than the modulus — enforced
-/// at const-evaluation time.
+/// `MODULUS - |value|`. The unsigned magnitude must be strictly less than the modulus;
+/// this is checked at const-evaluation time.
+///
+/// # Examples
 ///
 /// ```ignore
 /// const COEFF_B: Fq = r0_fp!("7");

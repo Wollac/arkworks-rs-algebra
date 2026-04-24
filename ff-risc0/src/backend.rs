@@ -13,9 +13,9 @@ fn non_canonical_sum_of_products() -> ! {
 
 /// R0VM backend for [`ark_ff::FpConfig`].
 ///
-/// Parametrised by a user-provided [`R0Config`]. Field elements are stored as plain integers in
-/// `[0, p)`; arithmetic dispatches to `risc0-bigint2` on the `zkvm` target and to `num-bigint` on
-/// the host.
+/// Parameterized by a user-provided [`R0Config`]. Field elements are stored as plain
+/// integers in `[0, p)`; arithmetic dispatches to `risc0-bigint2` on the `zkvm` target
+/// and to `num-bigint` on the host.
 pub struct R0Backend<P, const N: usize>(PhantomData<P>)
 where
     P: R0Config<N>,
@@ -44,39 +44,39 @@ where
     #[inline(always)]
     fn add_assign(a: &mut Fp<Self, N>, b: &Fp<Self, N>) {
         let ap = ptr::from_mut(&mut a.0);
-        // SAFETY: modadd reads all inputs before writing, so out = a is allowed.
+        // SAFETY: `out` aliases `a`; see `FieldFfi::modadd` safety contract.
         unsafe { FieldFfi::modadd(ap, &b.0, &P::MODULUS, ap) }
     }
 
     #[inline(always)]
     fn sub_assign(a: &mut Fp<Self, N>, b: &Fp<Self, N>) {
         let ap = ptr::from_mut(&mut a.0);
-        // SAFETY: modsub reads all inputs before writing, so out = a is allowed.
+        // SAFETY: `out` aliases `a`; see `FieldFfi::modsub` safety contract.
         unsafe { FieldFfi::modsub(ap, &b.0, &P::MODULUS, ap) }
     }
 
     #[inline(always)]
     fn double_in_place(a: &mut Fp<Self, N>) {
         let ap = ptr::from_mut(&mut a.0);
-        // SAFETY: a aliases both inputs and output; modadd reads before writing.
+        // SAFETY: `out` aliases both inputs; see `FieldFfi::modadd` safety contract.
         unsafe { FieldFfi::modadd(ap, ap, &P::MODULUS, ap) }
     }
 
     #[inline(always)]
     fn neg_in_place(a: &mut Fp<Self, N>) {
         let ap = ptr::from_mut(&mut a.0);
-        // SAFETY: modsub reads all inputs before writing, so out = b is allowed.
+        // SAFETY: `out` aliases `b`; see `FieldFfi::modsub` safety contract.
         unsafe { FieldFfi::modsub(&Self::ZERO.0, ap, &P::MODULUS, ap) }
     }
 
     #[inline(always)]
     fn mul_assign(a: &mut Fp<Self, N>, b: &Fp<Self, N>) {
         let ap = ptr::from_mut(&mut a.0);
-        // SAFETY: modmul reads all inputs before writing, so out = a is allowed.
+        // SAFETY: `out` aliases `a`; see `FieldFfi::modmul` safety contract.
         unsafe { FieldFfi::modmul(ap, &b.0, &P::MODULUS, ap) }
     }
 
-    #[inline]
+    #[inline(always)]
     fn sum_of_products<const T: usize>(a: &[Fp<Self, N>; T], b: &[Fp<Self, N>; T]) -> Fp<Self, N> {
         if T == 0 {
             return Self::ZERO;
@@ -86,19 +86,20 @@ where
         let mut tmp = MaybeUninit::<BigInt<N>>::uninit();
         let acc_ptr = acc.as_mut_ptr();
         let tmp_ptr = tmp.as_mut_ptr();
-        // SAFETY: modmul_unchecked and modadd_unchecked writes all limbs of out
+        // SAFETY: `modmul_unchecked` and `modadd_unchecked` write all limbs of `out`;
+        // the first `modmul_unchecked` initialises `acc` before any `modadd_unchecked` reads it.
         unsafe {
-            // First iteration writes `a[0]*b[0]` straight into `acc`, skipping a redundant `0 + x`.
+            // Skip a redundant `0 + x` by writing `a[0] * b[0]` straight into `acc`.
             FieldFfi::modmul_unchecked(&a[0].0, &b[0].0, &P::MODULUS, acc_ptr);
             for i in 1..T {
                 FieldFfi::modmul_unchecked(&a[i].0, &b[i].0, &P::MODULUS, tmp_ptr);
                 FieldFfi::modadd_unchecked(acc_ptr, tmp_ptr, &P::MODULUS, acc_ptr);
             }
         }
-        // SAFETY: the T > 0 branch above always wrote `acc` via the first modmul.
+        // SAFETY: the `T > 0` branch above writes `acc` via the first `modmul_unchecked`.
         let acc = unsafe { acc.assume_init() };
 
-        // Verify result is canonical (honest prover check)
+        // Honest-prover check: unchecked variants omit the internal `result < modulus` assert.
         if acc >= P::MODULUS {
             non_canonical_sum_of_products();
         }
@@ -108,7 +109,7 @@ where
     #[inline(always)]
     fn square_in_place(a: &mut Fp<Self, N>) {
         let ap = ptr::from_mut(&mut a.0);
-        // SAFETY: a aliases both inputs and output; modmul reads before writing.
+        // SAFETY: `out` aliases both inputs; see `FieldFfi::modmul` safety contract.
         unsafe { FieldFfi::modmul(ap, ap, &P::MODULUS, ap) }
     }
 
@@ -118,7 +119,7 @@ where
             return None;
         }
         let mut out = MaybeUninit::<BigInt<N>>::uninit();
-        // SAFETY: modinv writes all limbs of out; out does not alias a (separate stack slot).
+        // SAFETY: `modinv` writes all limbs of `out`; `out` does not alias `a` (distinct slot).
         unsafe {
             FieldFfi::modinv(&a.0, &P::MODULUS, out.as_mut_ptr());
             Some(Fp(out.assume_init(), PhantomData))
@@ -140,14 +141,14 @@ where
     }
 }
 
-/// Extension trait providing `from_sign_and_limbs` on `Fp<R0Backend<_, _>, _>`, mirroring the
-/// inherent method that `MontBackend` already offers. Host code that calls
-/// `Fp::from_sign_and_limbs(is_positive, limbs)` on an R0-backed field resolves through this
-/// trait when it is in scope.
+/// Extension trait providing `from_sign_and_limbs` on `Fp<R0Backend<_, _>, _>`.
 ///
-/// This is runtime-only (trait methods can't be `const fn` on stable); const callers should go
-/// through [`crate::const_from_sign_and_limbs`] or the [`r0_fp!`](crate::r0_fp) macro instead.
+/// Mirrors the inherent method on `MontBackend`-backed fields. Import this trait to resolve
+/// `Fp::from_sign_and_limbs(is_positive, limbs)` calls on an R0-backed field. For `const`
+/// callers, use [`crate::const_from_sign_and_limbs`] or the [`r0_fp!`](crate::r0_fp) macro
+/// instead.
 pub trait R0Fp: Sized {
+    /// Builds a field element from a sign bit and little-endian `u64` magnitude limbs.
     fn from_sign_and_limbs(is_positive: bool, limbs: &[u64]) -> Self;
 }
 
@@ -162,12 +163,10 @@ where
 
         let mut repr = Self::ZERO;
         repr.0 .0[..limbs.len()].copy_from_slice(limbs);
-        if is_positive {
-            if repr.0 >= P::MODULUS {
-                repr.add_assign(&Self::ZERO); // FFI reduces
-            }
-        } else {
+        if !is_positive {
             repr.neg_in_place(); // modsub handles any magnitude
+        } else if repr.0 >= P::MODULUS {
+            repr.add_assign(&Self::ZERO); // FFI reduces
         }
         repr
     }

@@ -1,11 +1,4 @@
-//! Const-evaluable helpers used when constructing plain-form `Fp<R0Backend<_, _>, _>` values
-//! from numeric literals.
-//!
-//! The only item exposed outside the crate is [`const_from_sign_and_limbs`], which the
-//! [`r0_fp!`](crate::r0_fp) macro expands into via `$crate::const_from_sign_and_limbs`. Everything
-//! else in this module is `pub(crate)` — small BigInt utilities needed to implement both the
-//! literal conversion and the `NEG_ONE` constant in [`crate::R0Backend`]'s
-//! [`FpConfig`](ark_ff::FpConfig) impl.
+//! Const-evaluable helpers for constructing plain-integer `Fp<R0Backend<_, _>, _>` values.
 
 use ark_ff::{BigInt, Fp};
 use core::marker::PhantomData;
@@ -21,7 +14,7 @@ pub(crate) const fn const_is_zero<const N: usize>(a: &BigInt<N>) -> bool {
     true
 }
 
-/// `a < b` on little-endian limbs: compare from the most-significant limb down.
+// Little-endian limbs: compare from the most-significant limb down.
 pub(crate) const fn const_lt<const N: usize>(a: &BigInt<N>, b: &BigInt<N>) -> bool {
     let mut i = N;
     while i > 0 {
@@ -47,16 +40,12 @@ pub(crate) const fn const_sub_with_borrow<const N: usize>(
     (a, borrow != 0)
 }
 
-/// Const-evaluable construction of a plain-integer `Fp<R0Backend<P, N>, N>` from a sign-and-limbs
-/// pair. Sibling of the runtime [`R0Fp::from_sign_and_limbs`](crate::R0Fp::from_sign_and_limbs)
-/// trait method; this variant is usable in `const` contexts (macros, const fns) but is strict
-/// about its input range.
+/// Builds a plain-integer `Fp<R0Backend<P, N>, N>` from a sign-and-limbs pair in `const`
+/// context.
 ///
-/// Not intended for direct use; call the [`r0_fp!`](crate::r0_fp) macro, which expands a numeric
-/// literal into `(is_positive, &limbs)` via `ark_ff_macros::to_sign_and_limbs!` and forwards here.
-///
-/// The unsigned magnitude (`limbs` zero-padded to `N`) must be strictly less than the modulus;
-/// otherwise const-evaluation panics. Negative literals return `MODULUS - |value|`, with `-0`
+/// Expanded by the [`r0_fp!`](crate::r0_fp) macro; not intended for direct use. The unsigned
+/// magnitude (`limbs` zero-padded to `N`) must be strictly less than `P::MODULUS`, otherwise
+/// const-evaluation panics. Negative literals return `MODULUS - |value|`, with `-0`
 /// normalised to `0`.
 #[doc(hidden)]
 pub const fn const_from_sign_and_limbs<P, const N: usize>(
