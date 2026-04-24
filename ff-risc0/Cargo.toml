@@ -17,6 +17,7 @@ metadata.release.workspace = true
 [dependencies]
 ark-ff.workspace = true
 ark-ec.workspace = true
+ark-ff-risc0-macros.workspace = true
 ark-std.workspace = true
 ark-serialize.workspace = true
 num-bigint.workspace = true
@@ -26,7 +27,7 @@ risc0-bigint2 = "1.4.13"
 bytemuck = { version = "1", default-features = false }
 
 [dev-dependencies]
-ark-test-curves = { workspace = true, features = ["secp256k1"] }
+ark-test-curves = { workspace = true, features = ["bls12_381_scalar_field"] }
 
 [features]
 default = []

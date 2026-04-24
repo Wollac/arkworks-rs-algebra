@@ -1,7 +1,8 @@
 //! Field-parameter trait: the R0VM-backend analogue of `MontConfig`.
 
-use crate::{ffi::FieldFfi, R0Backend};
 use ark_ff::{BigInt, Fp, SqrtPrecomputation};
+
+use crate::{FieldFfi, R0Backend};
 
 /// Parameters of a prime field whose arithmetic routes through the R0VM backend.
 ///
@@ -21,7 +22,9 @@ where
     const GENERATOR: Fp<R0Backend<Self, N>, N>;
 
     /// The integer `s` such that `p - 1 = 2^s * t` for some odd integer `t`.
-    const TWO_ADICITY: u32;
+    ///
+    /// Defaults to the two-adic valuation of `MODULUS - 1`.
+    const TWO_ADICITY: u32 = Self::MODULUS.two_adic_valuation();
 
     /// `GENERATOR^t mod p`, i.e. a primitive `2^s`-th root of unity.
     const TWO_ADIC_ROOT_OF_UNITY: Fp<R0Backend<Self, N>, N>;
