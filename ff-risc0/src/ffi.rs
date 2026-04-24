@@ -67,7 +67,6 @@ pub trait FieldFfi: Sized {
 #[cfg(target_os = "zkvm")]
 mod zkvm_impl {
     use super::*;
-    use bytemuck::cast_ref;
     use risc0_bigint2::field::{
         modadd_256, modadd_384, modinv_256, modinv_384, modmul_256, modmul_384, modsub_256,
         modsub_384,
@@ -77,70 +76,71 @@ mod zkvm_impl {
         },
     };
 
-    // Reinterpret `*const BigInt<N>` as `&[u32; 2N]` for the risc0-bigint2 FFI.
-    //
-    // BigInt<N> is `pub struct BigInt<const N: usize>(pub [u64; N])` with default layout, and
-    // the inner field starts at offset 0 with matching alignment. On the zkvm (little-endian
-    // RISC-V), `[u64; N]` is bit-identical to `[u32; 2N]`, so the cast is a no-op.
+    /// Reinterprets `&BigInt<N>` as `&[u32; 2N]` for the risc0-bigint2 FFI.
+    #[inline(always)]
+    fn limbs<const N: usize, const M: usize>(x: &BigInt<N>) -> &[u32; M]
+    where
+        [u64; N]: bytemuck::NoUninit,
+        [u32; M]: bytemuck::AnyBitPattern,
+    {
+        bytemuck::cast_ref(&x.0)
+    }
+
+    // The `*const BigInt<N>` → `*const [u32; 2N]` pointer casts below rely on `BigInt<N>`
+    // being a tuple struct with `[u64; N]` at offset 0 and matching alignment. On the zkvm
+    // (little-endian RISC-V), `[u64; N]` is bit-identical to `[u32; 2N]`, so the cast is a
+    // no-op.
     impl FieldFfi for BigInt<4> {
         #[inline(always)]
         unsafe fn modadd(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe { modadd_256(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast()) }
+            unsafe { modadd_256(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modsub(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe { modsub_256(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast()) }
+            unsafe { modsub_256(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modmul(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe { modmul_256(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast()) }
+            unsafe { modmul_256(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modinv(a: &Self, m: &Self, out: *mut Self) {
-            unsafe { modinv_256(cast_ref(&a.0), cast_ref(&m.0), &mut *out.cast()) }
+            unsafe { modinv_256(limbs(a), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe {
-                modadd_256_unchecked(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast())
-            }
+            unsafe { modadd_256_unchecked(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe {
-                modmul_256_unchecked(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast())
-            }
+            unsafe { modmul_256_unchecked(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
     }
 
     impl FieldFfi for BigInt<6> {
         #[inline(always)]
         unsafe fn modadd(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe { modadd_384(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast()) }
+            unsafe { modadd_384(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modsub(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe { modsub_384(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast()) }
+            unsafe { modsub_384(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modmul(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe { modmul_384(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast()) }
+            unsafe { modmul_384(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modinv(a: &Self, m: &Self, out: *mut Self) {
-            unsafe { modinv_384(cast_ref(&a.0), cast_ref(&m.0), &mut *out.cast()) }
+            unsafe { modinv_384(limbs(a), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe {
-                modadd_384_unchecked(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast())
-            }
+            unsafe { modadd_384_unchecked(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
         #[inline(always)]
         unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: &Self, out: *mut Self) {
-            unsafe {
-                modmul_384_unchecked(&*a.cast(), &*b.cast(), cast_ref(&m.0), &mut *out.cast())
-            }
+            unsafe { modmul_384_unchecked(&*a.cast(), &*b.cast(), limbs(m), &mut *out.cast()) }
         }
     }
 }
