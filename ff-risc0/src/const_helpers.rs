@@ -69,6 +69,6 @@ where
     if is_positive {
         Fp(repr, PhantomData)
     } else {
-        Fp(const_sub_with_borrow(repr, &P::MODULUS).0, PhantomData)
+        Fp(const_sub_with_borrow(P::MODULUS, &repr).0, PhantomData)
     }
 }

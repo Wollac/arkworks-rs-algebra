@@ -45,7 +45,6 @@ pub use fields::*;
 #[cfg(feature = "r1cs")]
 pub mod constraints;
 
-// Target-conditional alias: `ark_ff::MontFp!` on host, `ark_ff_risc0::r0_fp!` on zkvm.
 #[cfg(not(all(target_os = "zkvm", target_vendor = "risc0")))]
 pub(crate) use ark_ff::MontFp;
 #[cfg(all(target_os = "zkvm", target_vendor = "risc0"))]

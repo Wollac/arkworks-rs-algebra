@@ -1,10 +1,12 @@
-//! Derive macro for `ark_ff_risc0::R0Config`.
-//!
-//! Precomputes `TWO_ADIC_ROOT_OF_UNITY` (and, if a small subgroup is configured,
-//! `LARGE_SUBGROUP_ROOT_OF_UNITY`) at macro-expansion time via `num-bigint::modpow`,
-//! so users only need to supply `modulus` and `generator`. The emitted constants are
-//! stored as plain integers in `[0, p)`, matching the R0 backend's representation.
+//! Derive macro for [`ark_ff_risc0::R0Config`](https://docs.rs/ark-ff-risc0/latest/ark_ff_risc0/trait.R0Config.html).
 
+#![warn(
+    unused,
+    future_incompatible,
+    nonstandard_style,
+    rust_2018_idioms,
+    rust_2021_compatibility
+)]
 #![forbid(unsafe_code)]
 
 use num_bigint::BigUint;
@@ -16,6 +18,10 @@ use syn::{DeriveInput, Expr, ExprLit, Lit, Meta};
 
 /// Derive the [`R0Config`](https://docs.rs/ark-ff-risc0/latest/ark_ff_risc0/trait.R0Config.html)
 /// trait.
+///
+/// Precomputes `TWO_ADIC_ROOT_OF_UNITY` (and, if a small subgroup is configured,
+/// `LARGE_SUBGROUP_ROOT_OF_UNITY`) at macro-expansion time via `num-bigint::modpow`, so
+/// users only need to supply `modulus` and `generator`.
 ///
 /// Attributes:
 /// * `modulus` (required): the prime modulus, as a decimal / hex / oct / bin string.

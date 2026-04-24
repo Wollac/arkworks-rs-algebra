@@ -89,7 +89,6 @@ where
         // SAFETY: `modmul_unchecked` and `modadd_unchecked` write all limbs of `out`;
         // the first `modmul_unchecked` initialises `acc` before any `modadd_unchecked` reads it.
         unsafe {
-            // Skip a redundant `0 + x` by writing `a[0] * b[0]` straight into `acc`.
             FieldFfi::modmul_unchecked(&a[0].0, &b[0].0, &P::MODULUS, acc_ptr);
             for i in 1..T {
                 FieldFfi::modmul_unchecked(&a[i].0, &b[i].0, &P::MODULUS, tmp_ptr);
@@ -99,7 +98,7 @@ where
         // SAFETY: the `T > 0` branch above writes `acc` via the first `modmul_unchecked`.
         let acc = unsafe { acc.assume_init() };
 
-        // Honest-prover check: unchecked variants omit the internal `result < modulus` assert.
+        // The unchecked variants skip the internal `result < modulus` assert, so re-check here.
         if acc >= P::MODULUS {
             non_canonical_sum_of_products();
         }
@@ -164,9 +163,9 @@ where
         let mut repr = Self::ZERO;
         repr.0 .0[..limbs.len()].copy_from_slice(limbs);
         if !is_positive {
-            repr.neg_in_place(); // modsub handles any magnitude
+            repr.neg_in_place();
         } else if repr.0 >= P::MODULUS {
-            repr.add_assign(&Self::ZERO); // FFI reduces
+            repr.add_assign(&Self::ZERO);
         }
         repr
     }

@@ -8,7 +8,7 @@
 //! * The mixed-radix path: `SMALL_SUBGROUP_BASE` + `LARGE_SUBGROUP_ROOT_OF_UNITY`.
 
 use ark_ff::{AdditiveGroup, BigInt, FftField, Field, Fp256, PrimeField, UniformRand};
-use ark_ff_risc0::{R0Backend, R0Config};
+use ark_ff_risc0::{r0_fp, R0Backend, R0Config};
 use ark_std::rand::SeedableRng;
 use ark_test_curves::bls12_381::Fr as ArkFr;
 
@@ -104,6 +104,26 @@ fn from_bigint_out_of_range() {
         BigInt::new(limbs)
     };
     assert!(OurFr::from_bigint(p_plus_one).is_none());
+}
+
+#[test]
+fn r0_fp_literals_match() {
+    // Positive, zero, and negative literals (the negative path is the one that regressed).
+    const ZERO: OurFr = r0_fp!("0");
+    const NEG_ZERO: OurFr = r0_fp!("-0");
+    const ONE: OurFr = r0_fp!("1");
+    const NEG_ONE: OurFr = r0_fp!("-1");
+    const SEVEN: OurFr = r0_fp!("7");
+    const NEG_SEVEN: OurFr = r0_fp!("-7");
+
+    assert_eq!(ZERO.into_bigint(), OurFr::ZERO.into_bigint());
+    assert_eq!(NEG_ZERO.into_bigint(), OurFr::ZERO.into_bigint());
+    assert_eq!(ONE.into_bigint(), OurFr::ONE.into_bigint());
+    assert_eq!(NEG_ONE.into_bigint(), OurFr::NEG_ONE.into_bigint());
+    assert_eq!(
+        (SEVEN + NEG_SEVEN).into_bigint(),
+        OurFr::ZERO.into_bigint()
+    );
 }
 
 #[test]
