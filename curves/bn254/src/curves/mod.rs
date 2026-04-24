@@ -2,9 +2,8 @@ use ark_ec::{
     bn,
     bn::{Bn, BnConfig, TwistType},
 };
-use ark_ff::MontFp;
 
-use crate::*;
+use crate::{MontFp, *};
 
 pub mod g1;
 pub mod g2;

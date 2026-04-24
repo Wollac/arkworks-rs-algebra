@@ -1,31 +1,14 @@
 //! [`FpConfig`] implementation that routes arithmetic through the R0VM backend.
 
-use crate::{config::R0Config, ffi::FieldFfi};
-use ark_ff::Zero;
-use ark_ff::{BigInt, Fp, FpConfig, SqrtPrecomputation};
-use core::marker::PhantomData;
-use core::mem::MaybeUninit;
-use core::ptr;
+use ark_ff::{AdditiveGroup, BigInt, Fp, FpConfig, SqrtPrecomputation, Zero};
+use core::{marker::PhantomData, mem::MaybeUninit, ops::AddAssign, ptr};
+
+use crate::{config::R0Config, const_helpers::const_sub_with_borrow, ffi::FieldFfi};
 
 #[cold]
 #[inline(never)]
 fn non_canonical_sum_of_products() -> ! {
     panic!("sum_of_products: result is non-canonical (malformed risc0-bigint2 proof)")
-}
-
-/// `x - 1` as a `BigInt<N>`. Undefined for `x == 0`; never called on zero (modulus > 1).
-const fn sub_one<const N: usize>(x: BigInt<N>) -> BigInt<N> {
-    let mut limbs = x.0;
-    let mut i = 0;
-    while i < N {
-        if limbs[i] > 0 {
-            limbs[i] -= 1;
-            return BigInt::new(limbs);
-        }
-        limbs[i] = u64::MAX;
-        i += 1;
-    }
-    BigInt::new(limbs)
 }
 
 /// R0VM backend for [`ark_ff::FpConfig`].
@@ -47,7 +30,10 @@ where
     const GENERATOR: Fp<Self, N> = P::GENERATOR;
     const ZERO: Fp<Self, N> = Fp(BigInt::zero(), PhantomData);
     const ONE: Fp<Self, N> = Fp(BigInt::one(), PhantomData);
-    const NEG_ONE: Fp<Self, N> = Fp(sub_one::<N>(P::MODULUS), PhantomData);
+    const NEG_ONE: Fp<Self, N> = Fp(
+        const_sub_with_borrow(P::MODULUS, &Self::ONE.0).0,
+        PhantomData,
+    );
     const TWO_ADICITY: u32 = P::TWO_ADICITY;
     const TWO_ADIC_ROOT_OF_UNITY: Fp<Self, N> = P::TWO_ADIC_ROOT_OF_UNITY;
     const SMALL_SUBGROUP_BASE: Option<u32> = P::SMALL_SUBGROUP_BASE;
@@ -151,5 +137,38 @@ where
     #[inline(always)]
     fn into_bigint(r: Fp<Self, N>) -> BigInt<N> {
         r.0
+    }
+}
+
+/// Extension trait providing `from_sign_and_limbs` on `Fp<R0Backend<_, _>, _>`, mirroring the
+/// inherent method that `MontBackend` already offers. Host code that calls
+/// `Fp::from_sign_and_limbs(is_positive, limbs)` on an R0-backed field resolves through this
+/// trait when it is in scope.
+///
+/// This is runtime-only (trait methods can't be `const fn` on stable); const callers should go
+/// through [`crate::const_from_sign_and_limbs`] or the [`r0_fp!`](crate::r0_fp) macro instead.
+pub trait R0Fp: Sized {
+    fn from_sign_and_limbs(is_positive: bool, limbs: &[u64]) -> Self;
+}
+
+impl<P, const N: usize> R0Fp for Fp<R0Backend<P, N>, N>
+where
+    P: R0Config<N>,
+    BigInt<N>: FieldFfi,
+{
+    #[inline]
+    fn from_sign_and_limbs(is_positive: bool, limbs: &[u64]) -> Self {
+        assert!(limbs.len() <= N);
+
+        let mut repr = Self::ZERO;
+        repr.0 .0[..limbs.len()].copy_from_slice(limbs);
+        if is_positive {
+            if repr.0 >= P::MODULUS {
+                repr.add_assign(&Self::ZERO); // FFI reduces
+            }
+        } else {
+            repr.neg_in_place(); // modsub handles any magnitude
+        }
+        repr
     }
 }

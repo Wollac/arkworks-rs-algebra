@@ -18,6 +18,9 @@ ark-ec = { workspace = true }
 ark-r1cs-std = { workspace = true, optional = true }
 ark-std = { workspace = true }
 
+[target.'cfg(all(target_os = "zkvm", target_vendor = "risc0"))'.dependencies]
+ark-ff-risc0 = { workspace = true }
+
 [dev-dependencies]
 ark-relations = { workspace = true }
 ark-serialize = { workspace = true }

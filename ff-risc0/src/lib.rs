@@ -19,48 +19,50 @@
 //! # Example
 //!
 //! ```ignore
-//! use ark_ff::{BigInt, Fp256};
-//! use ark_ff_risc0::{R0Backend, R0Config, SqrtPrecomputation};
+//! use ark_ff::{BigInt, Fp, Fp256};
+//! use ark_ff_risc0::{r0_fp, R0Backend, R0Config};
 //!
-//! pub struct Secp256k1FqConfig;
-//! impl R0Config<4> for Secp256k1FqConfig {
-//!     const MODULUS: BigInt<4> = BigInt::new([
-//!         0xFFFFFFFEFFFFFC2F, 0xFFFFFFFFFFFFFFFF,
-//!         0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF,
-//!     ]);
-//!     const GENERATOR: ark_ff::Fp<R0Backend<Self, 4>, 4> = /* ... */;
+//! pub struct FqConfig;
+//! impl R0Config<4> for FqConfig {
+//!     const MODULUS: BigInt<4> = ark_ff::BigInt!(
+//!         "115792089237316195423570985008687907853269984665640564039457584007908834671663"
+//!     );
+//!     const GENERATOR: Fp<R0Backend<Self, 4>, 4> = r0_fp!("3");
 //!     const TWO_ADICITY: u32 = 1;
-//!     const TWO_ADIC_ROOT_OF_UNITY: ark_ff::Fp<R0Backend<Self, 4>, 4> = /* ... */;
+//!     const TWO_ADIC_ROOT_OF_UNITY: Fp<R0Backend<Self, 4>, 4> = r0_fp!("-1");
 //! }
 //!
-//! pub type Fq = Fp256<R0Backend<Secp256k1FqConfig, 4>>;
+//! pub type Fq = Fp256<R0Backend<FqConfig, 4>>;
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 mod backend;
 mod config;
+mod const_helpers;
 mod ffi;
 
-pub use backend::R0Backend;
+pub use backend::{R0Backend, R0Fp};
 pub use config::R0Config;
+pub use const_helpers::const_from_sign_and_limbs;
 pub use ffi::FieldFfi;
-
-pub mod curves;
 
 /// Construct a plain-integer field element `Fp<R0Backend<_, N>, N>` from a numeric literal.
 ///
-/// Accepts decimal, hex (`0x...`), octal (`0o...`), or binary (`0b...`) strings, same as
-/// arkworks' [`ark_ff::BigInt!`]. The value must be strictly less than the field modulus; this
-/// is the caller's responsibility (not checked at const time).
+/// Accepts decimal, hex (`0x...`), octal (`0o...`), or binary (`0b...`) strings, optionally
+/// preceded by `-`; same surface as arkworks' [`ark_ff::MontFp!`]. Negative literals yield
+/// `MODULUS - |value|`. The unsigned magnitude must be strictly less than the modulus — enforced
+/// at const-evaluation time.
 ///
 /// ```ignore
 /// const COEFF_B: Fq = r0_fp!("7");
+/// const NEG_ONE: Fq = r0_fp!("-1");
 /// const G_X: Fq = r0_fp!("0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
 /// ```
 #[macro_export]
 macro_rules! r0_fp {
-    ($lit:expr) => {
-        ::ark_ff::Fp(::ark_ff::BigInt!($lit), ::core::marker::PhantomData)
-    };
+    ($lit:expr) => {{
+        let (is_positive, limbs) = ::ark_ff::ark_ff_macros::to_sign_and_limbs!($lit);
+        $crate::const_from_sign_and_limbs(is_positive, &limbs)
+    }};
 }

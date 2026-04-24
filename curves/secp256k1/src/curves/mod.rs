@@ -2,9 +2,9 @@ use ark_ec::{
     models::CurveConfig,
     short_weierstrass::{self as sw, SWCurveConfig},
 };
-use ark_ff::{AdditiveGroup, Field, MontFp, Zero};
+use ark_ff::{AdditiveGroup, Field, Zero};
 
-use crate::{fq::Fq, fr::Fr};
+use crate::{fq::Fq, fr::Fr, MontFp};
 
 #[cfg(test)]
 mod tests;

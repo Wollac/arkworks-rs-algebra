@@ -25,8 +25,7 @@ num-bigint.workspace = true
 risc0-bigint2 = "1.4.13"
 
 [dev-dependencies]
-ark-test-curves = { workspace = true, features = ["secp256k1", "bls12_381_curve"] }
-num-traits.workspace = true
+ark-test-curves = { workspace = true, features = ["secp256k1"] }
 
 [features]
 default = []

@@ -4,9 +4,13 @@ use ark_ec::{
     scalar_mul::glv::GLVConfig,
     short_weierstrass::{Affine, Projective},
 };
-use ark_ff::{AdditiveGroup, BigInt, Field, MontFp, PrimeField, Zero};
+use ark_ff::{AdditiveGroup, BigInt, Field, PrimeField, Zero};
+// Brings `from_sign_and_limbs` into scope for `Self::ScalarField::from_sign_and_limbs(...)` below.
+// On the host the inherent `MontBackend` method is used instead.
+#[cfg(all(target_os = "zkvm", target_vendor = "risc0"))]
+use ark_ff_risc0::R0Fp as _;
 
-use crate::{Fq, Fr};
+use crate::{Fq, Fr, MontFp};
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Config;

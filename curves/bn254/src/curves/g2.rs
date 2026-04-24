@@ -1,12 +1,12 @@
-use ark_ec::AffineRepr;
 use ark_ec::{
     models::{short_weierstrass::SWCurveConfig, CurveConfig},
     scalar_mul::glv::GLVConfig,
     short_weierstrass::{Affine, Projective},
+    AffineRepr,
 };
-use ark_ff::{AdditiveGroup, BigInt, Field, MontFp, PrimeField, Zero};
+use ark_ff::{AdditiveGroup, BigInt, Field, PrimeField, Zero};
 
-use crate::{Fq, Fq2, Fr};
+use crate::{Fq, Fq2, Fr, MontFp};
 
 pub type G2Affine = Affine<Config>;
 

@@ -5,34 +5,20 @@
 //! the host using the `num-bigint` fallback in `crate::ffi`, so no zkvm is required.
 
 use ark_ff::{AdditiveGroup, BigInt, Field, Fp, Fp256, PrimeField, UniformRand};
-use ark_ff_risc0::{R0Backend, R0Config};
+use ark_ff_risc0::{r0_fp, R0Backend, R0Config};
 use ark_std::rand::SeedableRng;
 use ark_test_curves::secp256k1::Fq as ArkFq;
-use core::marker::PhantomData;
 
 pub struct OurFqConfig;
 
 impl R0Config<4> for OurFqConfig {
-    // secp256k1 base-field modulus: 2^256 - 2^32 - 977.
-    const MODULUS: BigInt<4> = BigInt::new([
-        0xFFFFFFFEFFFFFC2F,
-        0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFFFF,
-        0xFFFFFFFFFFFFFFFF,
-    ]);
-    // Generator g = 3 (matching ark-test-curves' secp256k1::FqConfig).
-    const GENERATOR: Fp<R0Backend<Self, 4>, 4> = Fp(BigInt::new([3, 0, 0, 0]), PhantomData);
-    // p - 1 = 2 * odd, so TWO_ADICITY = 1 and the primitive 2nd root is p - 1 (= -1).
-    const TWO_ADICITY: u32 = 1;
-    const TWO_ADIC_ROOT_OF_UNITY: Fp<R0Backend<Self, 4>, 4> = Fp(
-        BigInt::new([
-            0xFFFFFFFEFFFFFC2E,
-            0xFFFFFFFFFFFFFFFF,
-            0xFFFFFFFFFFFFFFFF,
-            0xFFFFFFFFFFFFFFFF,
-        ]),
-        PhantomData,
+    const MODULUS: BigInt<4> = ark_ff::BigInt!(
+        "115792089237316195423570985008687907853269984665640564039457584007908834671663"
     );
+    const GENERATOR: Fp<R0Backend<Self, 4>, 4> = r0_fp!("3");
+    const TWO_ADICITY: u32 = 1;
+    // -1 mod p (primitive 2nd root of unity).
+    const TWO_ADIC_ROOT_OF_UNITY: Fp<R0Backend<Self, 4>, 4> = r0_fp!("-1");
 }
 
 pub type OurFq = Fp256<R0Backend<OurFqConfig, 4>>;

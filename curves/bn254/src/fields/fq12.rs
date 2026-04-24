@@ -1,6 +1,6 @@
-use ark_ff::{fields::*, MontFp};
+use ark_ff::fields::*;
 
-use crate::*;
+use crate::{MontFp, *};
 
 pub type Fq12 = Fp12<Fq12Config>;
 

@@ -44,3 +44,12 @@ pub use fields::*;
 
 #[cfg(feature = "r1cs")]
 pub mod constraints;
+
+/// Crate-internal alias for the field-element literal macro.
+///
+/// Expands to [`ark_ff::MontFp!`] on host targets and to [`ark_ff_risc0::r0_fp!`] on the
+/// risc0 zkVM target. Invoke as `MontFp!("...")` in downstream modules via `use crate::MontFp;`.
+#[cfg(not(all(target_os = "zkvm", target_vendor = "risc0")))]
+pub(crate) use ark_ff::MontFp;
+#[cfg(all(target_os = "zkvm", target_vendor = "risc0"))]
+pub(crate) use ark_ff_risc0::r0_fp as MontFp;
