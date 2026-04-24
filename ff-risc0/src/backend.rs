@@ -82,8 +82,8 @@ where
             return Self::ZERO;
         }
 
-        let mut acc = MaybeUninit::<BigInt<N>>::uninit();
-        let mut tmp = MaybeUninit::<BigInt<N>>::uninit();
+        let mut acc = MaybeUninit::uninit();
+        let mut tmp = MaybeUninit::uninit();
         let acc_ptr = acc.as_mut_ptr();
         let tmp_ptr = tmp.as_mut_ptr();
         // SAFETY: `modmul_unchecked` and `modadd_unchecked` write all limbs of `out`;
@@ -118,7 +118,7 @@ where
         if a.is_zero() {
             return None;
         }
-        let mut out = MaybeUninit::<BigInt<N>>::uninit();
+        let mut out = MaybeUninit::uninit();
         // SAFETY: `modinv` writes all limbs of `out`; `out` does not alias `a` (distinct slot).
         unsafe {
             FieldFfi::modinv(&a.0, &P::MODULUS, out.as_mut_ptr());
