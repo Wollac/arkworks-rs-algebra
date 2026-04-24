@@ -9,6 +9,13 @@
 //!
 //! The host fallback computes inverses via Fermat (`a^(p - 2) mod p`), which is only valid when
 //! the modulus is prime. All supported fields satisfy this.
+//!
+//! # Pointer-based FFI
+//!
+//! The trait uses raw pointers so that in-place callers (`a += b`, `a *= b`, `-a`, etc.) can
+//! pass `a` as both input and output without a stack copy. The risc0-bigint2 syscalls for
+//! `modadd`/`modsub`/`modmul` read all inputs before any writes, so aliasing `out` with `a` or
+//! `b` is safe. `modinv` does NOT support aliasing — `out` must not alias `a`.
 
 use ark_ff::BigInt;
 
@@ -18,16 +25,39 @@ use ark_ff::BigInt;
 /// its where clause. Users should not implement this trait directly; impls are provided by this
 /// crate for [`BigInt<4>`] and [`BigInt<6>`] on the `zkvm` target, and for all [`BigInt<N>`] on
 /// the host fallback.
-///
-/// Safety note for zkvm: `out` in [`FieldFfi::modinv`] must not alias `a` per the multi-constraint
-/// structure of the modinv circuit. The other ops are allowed to alias (risc0-bigint2 reads all
-/// inputs before writing).
 pub trait FieldFfi: Sized {
-    fn modadd(a: &Self, b: &Self, m: &Self, out: &mut Self);
-    fn modsub(a: &Self, b: &Self, m: &Self, out: &mut Self);
-    fn modmul(a: &Self, b: &Self, m: &Self, out: &mut Self);
-    /// Must not be called with `a == 0`. Prime modulus assumed (for the host fallback).
-    fn modinv(a: &Self, m: &Self, out: &mut Self);
+    /// # Safety
+    /// - All pointers must be readable / writable and properly aligned for `Self`.
+    /// - `out` may alias `a` or `b` (risc0-bigint2 reads before writing).
+    unsafe fn modadd(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+    /// # Safety
+    /// Same aliasing rules as [`FieldFfi::modadd`].
+    unsafe fn modsub(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+    /// # Safety
+    /// Same aliasing rules as [`FieldFfi::modadd`].
+    unsafe fn modmul(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+    /// # Safety
+    /// - All pointers must be readable / writable and properly aligned for `Self`.
+    /// - `out` must NOT alias `a` (the `modinv` circuit has multi-constraint structure that
+    ///   miscompiles on aliased input/output).
+    /// - `*a` must not be the zero element of the field (no inverse exists; zkvm panics,
+    ///   host fallback panics via Fermat returning zero).
+    unsafe fn modinv(a: *const Self, m: *const Self, out: *mut Self);
+
+    /// Unchecked modular add: same as [`FieldFfi::modadd`] but without the internal
+    /// `assert!(result < modulus)` canonicality check. Output is correct mod `m` but may be
+    /// anywhere in `[0, 2^{64·N})`. Caller is responsible for canonicalising before treating
+    /// the output as an arkworks `Fp`.
+    ///
+    /// # Safety
+    /// Same aliasing rules as [`FieldFfi::modadd`].
+    unsafe fn modadd_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
+
+    /// Unchecked modular multiply. See [`FieldFfi::modadd_unchecked`].
+    ///
+    /// # Safety
+    /// Same aliasing rules as [`FieldFfi::modmul`].
+    unsafe fn modmul_unchecked(a: *const Self, b: *const Self, m: *const Self, out: *mut Self);
 }
 
 #[cfg(target_os = "zkvm")]
@@ -36,61 +66,170 @@ mod zkvm_impl {
     use risc0_bigint2::field::{
         modadd_256, modadd_384, modinv_256, modinv_384, modmul_256, modmul_384, modsub_256,
         modsub_384,
+        unchecked::{
+            modadd_256 as modadd_256_unchecked, modadd_384 as modadd_384_unchecked,
+            modmul_256 as modmul_256_unchecked, modmul_384 as modmul_384_unchecked,
+        },
     };
 
-    /// Reinterpret a `&BigInt<N>` as `&[u32; 2N]` for the risc0-bigint2 FFI.
-    ///
-    /// Safe on little-endian targets (zkvm is RISC-V LE): byte layout is identical and u64
-    /// alignment subsumes u32 alignment.
-    ///
-    /// # Safety
-    /// - `N2` must equal `2 * N`.
-    /// - Target must be little-endian.
-    #[inline(always)]
-    unsafe fn as_u32<const N: usize, const N2: usize>(x: &BigInt<N>) -> &[u32; N2] {
-        unsafe { &*(core::ptr::addr_of!(x.0).cast::<[u32; N2]>()) }
-    }
-
-    #[inline(always)]
-    unsafe fn as_u32_mut<const N: usize, const N2: usize>(x: &mut BigInt<N>) -> &mut [u32; N2] {
-        unsafe { &mut *(core::ptr::addr_of_mut!(x.0).cast::<[u32; N2]>()) }
-    }
-
+    // Reinterpret `*const BigInt<N>` as `&[u32; 2N]` for the risc0-bigint2 FFI.
+    //
+    // BigInt<N> is `pub struct BigInt<const N: usize>(pub [u64; N])` with default layout, and
+    // the inner field starts at offset 0 with matching alignment. On the zkvm (little-endian
+    // RISC-V), `[u64; N]` is bit-identical to `[u32; 2N]`, so the cast is a no-op.
     impl FieldFfi for BigInt<4> {
         #[inline(always)]
-        fn modadd(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            unsafe { modadd_256(as_u32(a), as_u32(b), as_u32(m), as_u32_mut(out)) }
+        unsafe fn modadd(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            unsafe {
+                modadd_256(
+                    &*a.cast::<[u32; 8]>(),
+                    &*b.cast::<[u32; 8]>(),
+                    &*m.cast::<[u32; 8]>(),
+                    &mut *out.cast::<[u32; 8]>(),
+                )
+            }
         }
         #[inline(always)]
-        fn modsub(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            unsafe { modsub_256(as_u32(a), as_u32(b), as_u32(m), as_u32_mut(out)) }
+        unsafe fn modsub(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            unsafe {
+                modsub_256(
+                    &*a.cast::<[u32; 8]>(),
+                    &*b.cast::<[u32; 8]>(),
+                    &*m.cast::<[u32; 8]>(),
+                    &mut *out.cast::<[u32; 8]>(),
+                )
+            }
         }
         #[inline(always)]
-        fn modmul(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            unsafe { modmul_256(as_u32(a), as_u32(b), as_u32(m), as_u32_mut(out)) }
+        unsafe fn modmul(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            unsafe {
+                modmul_256(
+                    &*a.cast::<[u32; 8]>(),
+                    &*b.cast::<[u32; 8]>(),
+                    &*m.cast::<[u32; 8]>(),
+                    &mut *out.cast::<[u32; 8]>(),
+                )
+            }
         }
         #[inline(always)]
-        fn modinv(a: &Self, m: &Self, out: &mut Self) {
-            unsafe { modinv_256(as_u32(a), as_u32(m), as_u32_mut(out)) }
+        unsafe fn modinv(a: *const Self, m: *const Self, out: *mut Self) {
+            unsafe {
+                modinv_256(
+                    &*a.cast::<[u32; 8]>(),
+                    &*m.cast::<[u32; 8]>(),
+                    &mut *out.cast::<[u32; 8]>(),
+                )
+            }
+        }
+        #[inline(always)]
+        unsafe fn modadd_unchecked(
+            a: *const Self,
+            b: *const Self,
+            m: *const Self,
+            out: *mut Self,
+        ) {
+            unsafe {
+                modadd_256_unchecked(
+                    &*a.cast::<[u32; 8]>(),
+                    &*b.cast::<[u32; 8]>(),
+                    &*m.cast::<[u32; 8]>(),
+                    &mut *out.cast::<[u32; 8]>(),
+                )
+            }
+        }
+        #[inline(always)]
+        unsafe fn modmul_unchecked(
+            a: *const Self,
+            b: *const Self,
+            m: *const Self,
+            out: *mut Self,
+        ) {
+            unsafe {
+                modmul_256_unchecked(
+                    &*a.cast::<[u32; 8]>(),
+                    &*b.cast::<[u32; 8]>(),
+                    &*m.cast::<[u32; 8]>(),
+                    &mut *out.cast::<[u32; 8]>(),
+                )
+            }
         }
     }
 
     impl FieldFfi for BigInt<6> {
         #[inline(always)]
-        fn modadd(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            unsafe { modadd_384(as_u32(a), as_u32(b), as_u32(m), as_u32_mut(out)) }
+        unsafe fn modadd(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            unsafe {
+                modadd_384(
+                    &*a.cast::<[u32; 12]>(),
+                    &*b.cast::<[u32; 12]>(),
+                    &*m.cast::<[u32; 12]>(),
+                    &mut *out.cast::<[u32; 12]>(),
+                )
+            }
         }
         #[inline(always)]
-        fn modsub(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            unsafe { modsub_384(as_u32(a), as_u32(b), as_u32(m), as_u32_mut(out)) }
+        unsafe fn modsub(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            unsafe {
+                modsub_384(
+                    &*a.cast::<[u32; 12]>(),
+                    &*b.cast::<[u32; 12]>(),
+                    &*m.cast::<[u32; 12]>(),
+                    &mut *out.cast::<[u32; 12]>(),
+                )
+            }
         }
         #[inline(always)]
-        fn modmul(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            unsafe { modmul_384(as_u32(a), as_u32(b), as_u32(m), as_u32_mut(out)) }
+        unsafe fn modmul(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            unsafe {
+                modmul_384(
+                    &*a.cast::<[u32; 12]>(),
+                    &*b.cast::<[u32; 12]>(),
+                    &*m.cast::<[u32; 12]>(),
+                    &mut *out.cast::<[u32; 12]>(),
+                )
+            }
         }
         #[inline(always)]
-        fn modinv(a: &Self, m: &Self, out: &mut Self) {
-            unsafe { modinv_384(as_u32(a), as_u32(m), as_u32_mut(out)) }
+        unsafe fn modinv(a: *const Self, m: *const Self, out: *mut Self) {
+            unsafe {
+                modinv_384(
+                    &*a.cast::<[u32; 12]>(),
+                    &*m.cast::<[u32; 12]>(),
+                    &mut *out.cast::<[u32; 12]>(),
+                )
+            }
+        }
+        #[inline(always)]
+        unsafe fn modadd_unchecked(
+            a: *const Self,
+            b: *const Self,
+            m: *const Self,
+            out: *mut Self,
+        ) {
+            unsafe {
+                modadd_384_unchecked(
+                    &*a.cast::<[u32; 12]>(),
+                    &*b.cast::<[u32; 12]>(),
+                    &*m.cast::<[u32; 12]>(),
+                    &mut *out.cast::<[u32; 12]>(),
+                )
+            }
+        }
+        #[inline(always)]
+        unsafe fn modmul_unchecked(
+            a: *const Self,
+            b: *const Self,
+            m: *const Self,
+            out: *mut Self,
+        ) {
+            unsafe {
+                modmul_384_unchecked(
+                    &*a.cast::<[u32; 12]>(),
+                    &*b.cast::<[u32; 12]>(),
+                    &*m.cast::<[u32; 12]>(),
+                    &mut *out.cast::<[u32; 12]>(),
+                )
+            }
         }
     }
 }
@@ -122,25 +261,50 @@ mod host_impl {
         }
     }
 
+    // The host impl copies each input to an owned local at the top of the function, so the
+    // subsequent `BigUint` conversions never hold references into memory that `out` might
+    // alias. This keeps the host path UB-free regardless of aliasing.
     impl<const N: usize> FieldFfi for BigInt<N> {
-        fn modadd(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            let (a, b, m) = (to_biguint(a), to_biguint(b), to_biguint(m));
-            from_biguint(&((a + b) % &m), out);
+        unsafe fn modadd(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            let (a, b, m) = unsafe { (*a, *b, *m) };
+            let r = (to_biguint(&a) + to_biguint(&b)) % to_biguint(&m);
+            unsafe { from_biguint(&r, &mut *out) }
         }
-        fn modsub(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            let (a, b, m) = (to_biguint(a), to_biguint(b), to_biguint(m));
-            from_biguint(&((&a + &m - b) % &m), out);
+        unsafe fn modsub(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            let (a, b, m) = unsafe { (*a, *b, *m) };
+            let (a, b, m) = (to_biguint(&a), to_biguint(&b), to_biguint(&m));
+            let r = (&a + &m - b) % &m;
+            unsafe { from_biguint(&r, &mut *out) }
         }
-        fn modmul(a: &Self, b: &Self, m: &Self, out: &mut Self) {
-            let (a, b, m) = (to_biguint(a), to_biguint(b), to_biguint(m));
-            from_biguint(&((a * b) % &m), out);
+        unsafe fn modmul(a: *const Self, b: *const Self, m: *const Self, out: *mut Self) {
+            let (a, b, m) = unsafe { (*a, *b, *m) };
+            let r = (to_biguint(&a) * to_biguint(&b)) % to_biguint(&m);
+            unsafe { from_biguint(&r, &mut *out) }
         }
-        fn modinv(a: &Self, m: &Self, out: &mut Self) {
+        unsafe fn modinv(a: *const Self, m: *const Self, out: *mut Self) {
             // Fermat: a^(p - 2) mod p for prime p.
-            let a_u = to_biguint(a);
-            let m_u = to_biguint(m);
+            let (a, m) = unsafe { (*a, *m) };
+            let (a_u, m_u) = (to_biguint(&a), to_biguint(&m));
             let exp = &m_u - BigUint::from(2u32);
-            from_biguint(&a_u.modpow(&exp, &m_u), out);
+            unsafe { from_biguint(&a_u.modpow(&exp, &m_u), &mut *out) }
+        }
+        // Host fallback: `num-bigint` always reduces via `%`, so checked and unchecked behave
+        // identically on the host. We simply forward.
+        unsafe fn modadd_unchecked(
+            a: *const Self,
+            b: *const Self,
+            m: *const Self,
+            out: *mut Self,
+        ) {
+            unsafe { <Self as FieldFfi>::modadd(a, b, m, out) }
+        }
+        unsafe fn modmul_unchecked(
+            a: *const Self,
+            b: *const Self,
+            m: *const Self,
+            out: *mut Self,
+        ) {
+            unsafe { <Self as FieldFfi>::modmul(a, b, m, out) }
         }
     }
 }

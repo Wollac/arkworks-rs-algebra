@@ -1,8 +1,17 @@
 //! [`FpConfig`] implementation that routes arithmetic through the R0VM backend.
 
 use crate::{config::R0Config, ffi::FieldFfi};
-use ark_ff::{BigInt, BigInteger, Fp, FpConfig, SqrtPrecomputation};
+use ark_ff::Zero;
+use ark_ff::{BigInt, Fp, FpConfig, SqrtPrecomputation};
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
+use core::ptr;
+
+#[cold]
+#[inline(never)]
+fn non_canonical_sum_of_products() -> ! {
+    panic!("sum_of_products: result is non-canonical (malformed risc0-bigint2 proof)")
+}
 
 /// `x - 1` as a `BigInt<N>`. Undefined for `x == 0`; never called on zero (modulus > 1).
 const fn sub_one<const N: usize>(x: BigInt<N>) -> BigInt<N> {
@@ -46,78 +55,91 @@ where
     const LARGE_SUBGROUP_ROOT_OF_UNITY: Option<Fp<Self, N>> = P::LARGE_SUBGROUP_ROOT_OF_UNITY;
     const SQRT_PRECOMP: Option<SqrtPrecomputation<Fp<Self, N>>> = P::SQRT_PRECOMP;
 
-    #[inline]
+    #[inline(always)]
     fn add_assign(a: &mut Fp<Self, N>, b: &Fp<Self, N>) {
-        let m = P::MODULUS;
-        let a_in = a.0;
-        FieldFfi::modadd(&a_in, &b.0, &m, &mut a.0);
+        let ap = ptr::from_mut(&mut a.0);
+        // SAFETY: modadd reads all inputs before writing, so out = a is allowed.
+        unsafe { FieldFfi::modadd(ap, &b.0, &P::MODULUS, ap) }
     }
 
-    #[inline]
+    #[inline(always)]
     fn sub_assign(a: &mut Fp<Self, N>, b: &Fp<Self, N>) {
-        let m = P::MODULUS;
-        let a_in = a.0;
-        FieldFfi::modsub(&a_in, &b.0, &m, &mut a.0);
+        let ap = ptr::from_mut(&mut a.0);
+        // SAFETY: modsub reads all inputs before writing, so out = a is allowed.
+        unsafe { FieldFfi::modsub(ap, &b.0, &P::MODULUS, ap) }
     }
 
-    #[inline]
+    #[inline(always)]
     fn double_in_place(a: &mut Fp<Self, N>) {
-        let m = P::MODULUS;
-        let a_in = a.0;
-        FieldFfi::modadd(&a_in, &a_in, &m, &mut a.0);
+        let ap = ptr::from_mut(&mut a.0);
+        // SAFETY: a aliases both inputs and output; modadd reads before writing.
+        unsafe { FieldFfi::modadd(ap, ap, &P::MODULUS, ap) }
     }
 
-    #[inline]
+    #[inline(always)]
     fn neg_in_place(a: &mut Fp<Self, N>) {
-        // `p - a` via plain BigInt subtraction bypasses the modsub syscall. Result is canonical
-        // by construction since 0 <= a < p.
-        if a.0 != BigInt::zero() {
-            let mut tmp = P::MODULUS;
-            tmp.sub_with_borrow(&a.0);
-            a.0 = tmp;
-        }
+        let ap = ptr::from_mut(&mut a.0);
+        // SAFETY: modsub reads all inputs before writing, so out = b is allowed.
+        unsafe { FieldFfi::modsub(&Self::ZERO.0, ap, &P::MODULUS, ap) }
     }
 
-    #[inline]
+    #[inline(always)]
     fn mul_assign(a: &mut Fp<Self, N>, b: &Fp<Self, N>) {
-        let m = P::MODULUS;
-        let a_in = a.0;
-        FieldFfi::modmul(&a_in, &b.0, &m, &mut a.0);
-    }
-
-    #[inline]
-    fn square_in_place(a: &mut Fp<Self, N>) {
-        let m = P::MODULUS;
-        let a_in = a.0;
-        FieldFfi::modmul(&a_in, &a_in, &m, &mut a.0);
+        let ap = ptr::from_mut(&mut a.0);
+        // SAFETY: modmul reads all inputs before writing, so out = a is allowed.
+        unsafe { FieldFfi::modmul(ap, &b.0, &P::MODULUS, ap) }
     }
 
     #[inline]
     fn sum_of_products<const T: usize>(a: &[Fp<Self, N>; T], b: &[Fp<Self, N>; T]) -> Fp<Self, N> {
-        // risc0-bigint2 has no fused MAC syscall; naive loop.
-        let m = P::MODULUS;
-        let mut acc = BigInt::zero();
-        let mut tmp = BigInt::zero();
-        for i in 0..T {
-            FieldFfi::modmul(&a[i].0, &b[i].0, &m, &mut tmp);
-            let acc_in = acc;
-            FieldFfi::modadd(&acc_in, &tmp, &m, &mut acc);
+        if T == 0 {
+            return Self::ZERO;
+        }
+
+        let mut acc = MaybeUninit::<BigInt<N>>::uninit();
+        let mut tmp = MaybeUninit::<BigInt<N>>::uninit();
+        let acc_ptr = acc.as_mut_ptr();
+        let tmp_ptr = tmp.as_mut_ptr();
+        // SAFETY: modmul_unchecked and modadd_unchecked writes all limbs of out
+        unsafe {
+            // First iteration writes `a[0]*b[0]` straight into `acc`, skipping a redundant `0 + x`.
+            FieldFfi::modmul_unchecked(&a[0].0, &b[0].0, &P::MODULUS, acc_ptr);
+            for i in 1..T {
+                FieldFfi::modmul_unchecked(&a[i].0, &b[i].0, &P::MODULUS, tmp_ptr);
+                FieldFfi::modadd_unchecked(acc_ptr, tmp_ptr, &P::MODULUS, acc_ptr);
+            }
+        }
+        // SAFETY: the T > 0 branch above always wrote `acc` via the first modmul.
+        let acc = unsafe { acc.assume_init() };
+
+        // Verify result is canonical (honest prover check)
+        if acc >= P::MODULUS {
+            non_canonical_sum_of_products();
         }
         Fp(acc, PhantomData)
     }
 
-    #[inline]
-    fn inverse(a: &Fp<Self, N>) -> Option<Fp<Self, N>> {
-        if a.0 == BigInt::zero() {
-            return None;
-        }
-        let m = P::MODULUS;
-        let mut out = BigInt::zero();
-        FieldFfi::modinv(&a.0, &m, &mut out);
-        Some(Fp(out, PhantomData))
+    #[inline(always)]
+    fn square_in_place(a: &mut Fp<Self, N>) {
+        let ap = ptr::from_mut(&mut a.0);
+        // SAFETY: a aliases both inputs and output; modmul reads before writing.
+        unsafe { FieldFfi::modmul(ap, ap, &P::MODULUS, ap) }
     }
 
-    #[inline]
+    #[inline(always)]
+    fn inverse(a: &Fp<Self, N>) -> Option<Fp<Self, N>> {
+        if a.is_zero() {
+            return None;
+        }
+        let mut out = MaybeUninit::<BigInt<N>>::uninit();
+        // SAFETY: modinv writes all limbs of out; out does not alias a (separate stack slot).
+        unsafe {
+            FieldFfi::modinv(&a.0, &P::MODULUS, out.as_mut_ptr());
+            Some(Fp(out.assume_init(), PhantomData))
+        }
+    }
+
+    #[inline(always)]
     fn from_bigint(r: BigInt<N>) -> Option<Fp<Self, N>> {
         if r >= P::MODULUS {
             None
@@ -126,7 +148,7 @@ where
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn into_bigint(r: Fp<Self, N>) -> BigInt<N> {
         r.0
     }
